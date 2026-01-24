@@ -1,3 +1,5 @@
+[![Noto Emoji](images/noto.png)](https://www.patreon.com/posts/blob-emoji-pack-78280403)
+
 # Build Noto Blob Emoji
 
 > **Credit:** Original guide posted by **RKBDI** on Telegram: [t.me/rkbdiemoji/379](https://t.me/rkbdiemoji/379)
@@ -31,7 +33,7 @@ pip install -r requirements.txt
 ## Build Process
 
 ### 1. Build CBDT/CBLC Font (Standard / PNG)
-*Takes 5m - 2h depending on CPU.*
+*Takes 5m – 2h depending on CPU*
 ```bash
 time make -j BYPASS_SEQUENCE_CHECK='True'
 
