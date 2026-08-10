@@ -1,20 +1,24 @@
-name: Continuous Test + Deploy
+name: Source checks
 
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  health_check:
+  source-checks:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3
-      uses: actions/setup-python@v2
-    - name: Install FontTools
-      run: pip install fonttools pytest
-    - name: pytest
-      run: pytest
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # The inherited pytest suite asserts font artifacts produced by a separate
+      # font-build pipeline. This repository publishes static SVG bundles only;
+      # bundle-check.yml performs its functional Unicode/asset validation.
+      - name: Check bundle-builder syntax
+        run: python -m py_compile scripts/build_bundle.py
