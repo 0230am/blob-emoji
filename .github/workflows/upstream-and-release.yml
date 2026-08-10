@@ -1,0 +1,72 @@
+name: Upstream sync and release bundle
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-upstream:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch and merge upstream
+        id: upstream
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/tpnonthealps/blob-emoji.git 2>/dev/null || git remote set-url upstream https://github.com/tpnonthealps/blob-emoji.git
+          git fetch upstream main --tags
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-commit --no-ff upstream/main
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+      - name: Create upstream update pull request
+        if: steps.upstream.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/upstream-sync
+          delete-branch: true
+          title: 'chore: sync tpnonthealps/blob-emoji upstream'
+          commit-message: 'chore: sync tpnonthealps/blob-emoji upstream'
+          body: |
+            Automated weekly sync from https://github.com/tpnonthealps/blob-emoji.
+
+            The pull-request checks build the static release bundle and publish explicit Emoji 17 coverage metadata as an artifact.
+
+  build-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and validate Unicode Emoji 17 bundle
+        run: python scripts/build_bundle.py --output dist/blob-emoji
+      - name: Upload bundle and coverage metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-emoji-bundle
+          path: dist/blob-emoji
+          if-no-files-found: error
+      - name: Package release archive
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: tar -C dist -czf blob-emoji-${{ github.sha }}.tar.gz blob-emoji
+      - name: Publish immutable release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: bundle-${{ github.sha }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then exit 0; fi
+          gh release create "$TAG" "blob-emoji-${{ github.sha }}.tar.gz" --target "${{ github.sha }}" --title "Blob Emoji bundle $TAG" --notes "Static SVG bundle generated from this immutable source commit. See assets.json in the archive for Emoji 17 coverage."

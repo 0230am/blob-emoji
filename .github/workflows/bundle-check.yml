@@ -1,0 +1,22 @@
+name: Bundle check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/build_bundle.py --output dist/blob-emoji
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blob-emoji-bundle-validation
+          path: dist/blob-emoji
