@@ -24,7 +24,11 @@ EMOJIBASE_URLS = {
     "license": f"{EMOJIBASE_BASE_URL}/LICENSE",
 }
 UNSAFE_TAGS = {"script", "foreignobject", "iframe", "object", "embed", "audio", "video", "image"}
-UNSAFE_STYLE = re.compile(r"(?:@import|url\s*\(|expression\s*\()", re.IGNORECASE)
+UNSAFE_STYLE = re.compile(r"(?:@import|expression\s*\()", re.IGNORECASE)
+URL_START = re.compile(r"url\s*\(", re.IGNORECASE)
+URL_REFERENCE = re.compile(r"url\s*\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE)
+SAFE_FRAGMENT = re.compile(r"#[A-Za-z_][A-Za-z0-9_.:-]*")
+PAINT_ELEMENTS = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text"}
 
 
 def fetch(url: str) -> bytes:
@@ -78,6 +82,30 @@ def asset_key(path: Path) -> str | None:
     return sequence_key([part.removeprefix("u") for part in match.group(1).split("_")])
 
 
+def resolve_svg_alias(source: Path, asset_directory: Path) -> Path:
+    """Resolve upstream filename aliases without allowing directory traversal."""
+    root = asset_directory.resolve()
+    current = source.resolve()
+    visited = set()
+    while True:
+        if current in visited:
+            raise ValueError(f"cyclic SVG alias starting at {source}")
+        visited.add(current)
+        raw = current.read_bytes()
+        if raw.lstrip().startswith(b"<"):
+            return current
+        try:
+            alias = raw.decode("ascii").strip()
+        except UnicodeDecodeError as error:
+            raise ValueError(f"invalid non-XML SVG asset: {current}") from error
+        if not re.fullmatch(r"emoji_u[0-9a-f]+(?:_[0-9a-f]+)*\.svg", alias, re.IGNORECASE):
+            raise ValueError(f"invalid SVG alias in {current}: {alias!r}")
+        target = (current.parent / alias).resolve()
+        if target.parent != root or not target.is_file():
+            raise ValueError(f"SVG alias escapes its asset directory or is missing: {current} -> {alias}")
+        current = target
+
+
 def without_emoji_vs(sequence: str) -> str:
     """Match upstream's FE0F-elided filename convention without changing the key."""
     return "-".join(point for point in sequence.split("-") if point != "FE0F")
@@ -114,13 +142,79 @@ def local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
 
+def fragment_references(value: str) -> set[str]:
+    references = set()
+    for match in URL_REFERENCE.finditer(value):
+        target = match.group(2).strip()
+        if SAFE_FRAGMENT.fullmatch(target):
+            references.add(target[1:])
+    return references
+
+
+def has_unsafe_url(value: str) -> bool:
+    matches = list(URL_REFERENCE.finditer(value))
+    if len(matches) != len(URL_START.findall(value)):
+        return True
+    return any(not SAFE_FRAGMENT.fullmatch(match.group(2).strip()) for match in matches)
+
+
+def sanitize_inline_style(value: str) -> str:
+    declarations = []
+    for declaration in value.split(";"):
+        declaration = declaration.strip()
+        if not declaration or ":" not in declaration:
+            continue
+        name, css_value = declaration.split(":", 1)
+        name = name.strip()
+        css_value = css_value.strip()
+        if not re.fullmatch(r"--?[A-Za-z][A-Za-z0-9-]*|[A-Za-z][A-Za-z0-9-]*", name):
+            continue
+        if UNSAFE_STYLE.search(css_value) or has_unsafe_url(css_value):
+            continue
+        declarations.append(f"{name}:{css_value}")
+    return ";".join(declarations)
+
+
+def tree_fragment_references(root: ET.Element) -> set[str]:
+    references = set()
+    for element in root.iter():
+        for attribute, value in element.attrib.items():
+            references.update(fragment_references(value))
+            if local_name(attribute) == "href" and SAFE_FRAGMENT.fullmatch(value.strip()):
+                references.add(value.strip()[1:])
+        if local_name(element.tag) == "style" and element.text:
+            references.update(fragment_references(element.text))
+    return references
+
+
 def sanitize_svg(source: Path, destination: Path) -> None:
     raw = source.read_bytes()
     if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
         raise ValueError(f"unsafe XML declaration in {source}")
-    root = ET.fromstring(raw)
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as error:
+        raise ValueError(f"invalid SVG XML in {source}: {error}") from error
     if local_name(root.tag) != "svg":
         raise ValueError(f"not an SVG root: {source}")
+
+    gradient_ids = {
+        element.attrib["id"]
+        for element in root.iter()
+        if local_name(element.tag) in {"lineargradient", "radialgradient"} and "id" in element.attrib
+    }
+    source_references = tree_fragment_references(root)
+    source_used_gradients = source_references & gradient_ids
+    painted_elements = []
+    for element in root.iter():
+        if local_name(element.tag) not in PAINT_ELEMENTS:
+            continue
+        references = set()
+        for attribute, value in element.attrib.items():
+            if local_name(attribute) in {"fill", "stroke", "style"}:
+                references.update(fragment_references(value))
+        if references & gradient_ids:
+            painted_elements.append((element, references & gradient_ids))
 
     def clean(parent: ET.Element) -> None:
         for child in list(parent):
@@ -130,14 +224,37 @@ def sanitize_svg(source: Path, destination: Path) -> None:
             clean(child)
         for attribute, value in list(parent.attrib.items()):
             name = local_name(attribute)
-            if name.startswith("on") or (name in {"href", "src"} and not value.strip().startswith("#")):
+            if name.startswith("on") or (name in {"href", "src"} and not SAFE_FRAGMENT.fullmatch(value.strip())):
                 del parent.attrib[attribute]
-            elif name == "style" and UNSAFE_STYLE.search(value):
+            elif name == "style":
+                sanitized = sanitize_inline_style(value)
+                if sanitized:
+                    parent.attrib[attribute] = sanitized
+                else:
+                    del parent.attrib[attribute]
+            elif URL_START.search(value) and (UNSAFE_STYLE.search(value) or has_unsafe_url(value)):
                 del parent.attrib[attribute]
-        if local_name(parent.tag) == "style" and parent.text and UNSAFE_STYLE.search(parent.text):
-            parent.text = ""
+        if local_name(parent.tag) == "style" and parent.text:
+            if UNSAFE_STYLE.search(parent.text) or has_unsafe_url(parent.text):
+                parent.text = ""
 
     clean(root)
+    ids = {element.attrib["id"] for element in root.iter() if "id" in element.attrib}
+    sanitized_references = tree_fragment_references(root)
+    unresolved = sanitized_references - ids
+    if unresolved:
+        raise ValueError(f"sanitized SVG has unresolved same-document references in {source}: {sorted(unresolved)}")
+    orphaned_gradients = source_used_gradients - sanitized_references
+    if orphaned_gradients:
+        raise ValueError(f"sanitization orphaned referenced gradients in {source}: {sorted(orphaned_gradients)}")
+    for element, expected_references in painted_elements:
+        actual_references = set()
+        for attribute, value in element.attrib.items():
+            if local_name(attribute) in {"fill", "stroke", "style"}:
+                actual_references.update(fragment_references(value))
+        missing_paint = expected_references - actual_references
+        if missing_paint:
+            raise ValueError(f"sanitization removed gradient paint from {local_name(element.tag)} in {source}: {sorted(missing_paint)}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(root).write(destination, encoding="utf-8", xml_declaration=True)
 
@@ -205,14 +322,20 @@ def main() -> int:
         raise ValueError("Invalid Emojibase data or messages dataset")
 
     assets: dict[str, str] = {}
-    for source in sorted((repo / "svg").glob("*.svg")):
-        key = asset_key(source)
-        if key:
+    asset_directories = (
+        repo / "svg",
+        repo / "third_party" / "region-flags" / "waved-svg",
+    )
+    for asset_directory in asset_directories:
+        for source in sorted(asset_directory.glob("*.svg")):
+            key = asset_key(source)
+            if not key:
+                continue
             filename = f"{key.lower()}.svg"
-            if filename in assets.values():
-                raise ValueError(f"duplicate normalized SVG filename: {filename}")
-            sanitize_svg(source, output / "svg" / filename)
-            assets[key] = filename
+            if key in assets:
+                raise ValueError(f"duplicate SVG sequence {key}: {assets[key]} and {source}")
+            sanitize_svg(resolve_svg_alias(source, asset_directory), output / "svg" / filename)
+            assets[key] = str(source.relative_to(repo))
     copy_notices(repo, output, emojibase_license)
 
     groups = messages.get("groups")
@@ -319,6 +442,7 @@ def main() -> int:
         "Each compact base-emoji row follows `record_fields`; sequence integers index `sequences`, while name and keyword integers index `strings`. Shortcode values also index `sequences`. "
         "`assets.json` documents deterministic image lookup and explicitly lists missing Emoji 17 sequences. "
         "Convert a sequence to lowercase hexadecimal code points joined by `-`, remove `fe0f`, then use `svg/<asset-key>.svg`. "
+        "Country flags use the preserved upstream waved region-flag SVGs; render those assets instead of the regional-indicator text. "
         "SVGs were XML-sanitized during this build. See `LICENSES/` for preserved upstream and Emojibase notices.\n",
         encoding="utf-8",
     )
