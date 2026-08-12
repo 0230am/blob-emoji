@@ -45,14 +45,19 @@ jobs:
             The pull-request checks build the static release bundle and publish explicit Emoji 17 coverage metadata as an artifact.
 
   build-bundle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+      - name: Install pinned bundle dependencies
+        run: pip install --requirement requirements-bundle.txt
       - name: Build and validate Unicode Emoji 17 bundle
-        run: python scripts/build_bundle.py --output dist/blob-emoji
+        run: |
+          python scripts/build_bundle.py --output dist/blob-emoji
+          python scripts/verify_bundle.py dist/blob-emoji
       - name: Upload bundle and coverage metadata
         uses: actions/upload-artifact@v4
         with:
@@ -61,7 +66,9 @@ jobs:
           if-no-files-found: error
       - name: Package release archive
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: tar -C dist -czf blob-emoji-${{ github.sha }}.tar.gz blob-emoji
+        run: |
+          python scripts/package_bundle.py dist/blob-emoji blob-emoji-${{ github.sha }}.tar.gz
+          python scripts/verify_bundle.py dist/blob-emoji --archive blob-emoji-${{ github.sha }}.tar.gz
       - name: Publish immutable release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
@@ -69,4 +76,4 @@ jobs:
           TAG: bundle-${{ github.sha }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then exit 0; fi
-          gh release create "$TAG" "blob-emoji-${{ github.sha }}.tar.gz" --target "${{ github.sha }}" --title "Blob Emoji bundle $TAG" --notes "Static SVG bundle generated from this immutable source commit. See assets.json in the archive for Emoji 17 coverage."
+          gh release create "$TAG" "blob-emoji-${{ github.sha }}.tar.gz" "blob-emoji-${{ github.sha }}.tar.gz.sha256" --target "${{ github.sha }}" --title "Blob Emoji bundle $TAG" --notes "Self-contained SVG, picker, text-recognition, and atlas bundle generated from this immutable source commit. See manifest.json and checksums.sha256 in the archive."

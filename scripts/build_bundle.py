@@ -12,6 +12,17 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from bundle_artifacts import (
+    ATLAS_SIZE,
+    CELL_SIZE,
+    WEBP_ALPHA_QUALITY,
+    WEBP_METHOD,
+    WEBP_QUALITY,
+    WEBP_VERSION,
+    build_atlases,
+    write_checksums,
+)
+
 EMOJI_VERSION = "17.0"
 EMOJI_TEST_URL = "https://www.unicode.org/Public/17.0.0/emoji/emoji-test.txt"
 EMOJIBASE_VERSION = "17.0.0"
@@ -344,9 +355,10 @@ def main() -> int:
     if not isinstance(groups, list) or not isinstance(subgroups, list) or not isinstance(skin_tones, list):
         raise ValueError("Emojibase messages are missing groups, subgroups, or skin tones")
     picker_records: list[list[object]] = []
-    shortcodes: dict[str, str] = {}
+    shortcodes: dict[str, int] = {}
     missing: list[str] = []
     picker_coverage: set[str] = set()
+    text_labels: dict[str, str] = {}
 
     strings: list[str] = []
     string_indexes: dict[str, int] = {}
@@ -371,6 +383,7 @@ def main() -> int:
         if key in picker_coverage:
             raise ValueError(f"Duplicate Emojibase picker sequence: {key}")
         picker_coverage.add(key)
+        text_labels[key] = label
         variant_records: list[list[object]] = []
         for variant in record.get("skins", []):
             variant_key = resolve_expected_key(str(variant.get("hexcode", "")), normalized_expected)
@@ -379,6 +392,7 @@ def main() -> int:
             if variant_key in picker_coverage:
                 raise ValueError(f"Duplicate Emojibase skin sequence: {variant_key}")
             picker_coverage.add(variant_key)
+            text_labels[variant_key] = label
             variant_records.append([sequence_indexes[variant_key], variant.get("tone")])
         picker_records.append([
             sequence_indexes[key],
@@ -408,6 +422,7 @@ def main() -> int:
         if key not in assets and without_emoji_vs(key) not in assets:
             missing.append(key)
 
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     picker = {
         "schema_version": 1,
         "unicode_emoji_version": EMOJI_VERSION,
@@ -427,25 +442,94 @@ def main() -> int:
         "schema_version": 1,
         "unicode_emoji_version": EMOJI_VERSION,
         "source": {
-            "repository": "https://github.com/tpnonthealps/blob-emoji",
-            "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+            "repository": "https://github.com/0230am/blob-emoji",
+            "upstream_repository": "https://github.com/tpnonthealps/blob-emoji",
+            "commit": commit,
         },
         "path_template": "svg/{asset_key}.svg",
         "asset_key": "lowercase hexadecimal code points joined by '-', with FE0F removed",
         "missing": missing,
     }
+    shortcodes_by_sequence: dict[int, list[str]] = {}
+    for alias, sequence_index in shortcodes.items():
+        shortcodes_by_sequence.setdefault(sequence_index, []).append(alias)
+    clover_rows = [
+        [
+            sequences[record[0]],
+            record[1],
+            record[2],
+            record[4],
+            sorted(shortcodes_by_sequence.get(record[0], [])),
+        ]
+        for record in picker_records
+    ]
+    clover_picker = {
+        "schema_version": 1,
+        "unicode_emoji_version": EMOJI_VERSION,
+        "emojibase_version": EMOJIBASE_VERSION,
+        "record_fields": ["sequence", "label_string_index", "group_index", "keyword_string_indexes", "shortcodes"],
+        "group_fields": ["key", "label", "order"],
+        "groups": [[group["key"], group["message"], group["order"]] for group in groups],
+        "strings": strings,
+        "emoji": clover_rows,
+    }
+    text_manifest = {
+        "schema_version": 1,
+        "unicode_emoji_version": EMOJI_VERSION,
+        "missing": missing,
+        "sequences": {sequence: text_labels[sequence] for sequence in sequences},
+    }
     write_compact_json(output / "picker.json", picker)
     write_compact_json(output / "assets.json", assets_manifest)
+    write_compact_json(output / "clover-picker.json", clover_picker)
+    write_compact_json(output / "text-manifest.json", text_manifest)
+    atlas_files = build_atlases(output, [row[0] for row in clover_rows], set(missing))
+    manifest = {
+        "schema_version": 1,
+        "bundle_id": f"bundle-{commit}",
+        "unicode_emoji_version": EMOJI_VERSION,
+        "emojibase_version": EMOJIBASE_VERSION,
+        "source": {
+            "repository": "https://github.com/0230am/blob-emoji",
+            "upstream_repository": "https://github.com/tpnonthealps/blob-emoji",
+            "commit": commit,
+        },
+        "picker": "clover-picker.json",
+        "source_picker": "picker.json",
+        "text_manifest": "text-manifest.json",
+        "atlas": {
+            "size": ATLAS_SIZE,
+            "cell_size": CELL_SIZE,
+            "files": atlas_files,
+            "rasterizer": {"name": "resvg_py", "version": "0.3.4", "fit": "contain"},
+            "encoder": {
+                "name": "Pillow WebP",
+                "version": "11.3.0",
+                "libwebp_version": WEBP_VERSION,
+                "quality": WEBP_QUALITY,
+                "alpha_quality": WEBP_ALPHA_QUALITY,
+                "method": WEBP_METHOD,
+                "exact": True,
+            },
+        },
+        "svg": {"path_template": "svg/{asset_key}.svg", "assets_manifest": "assets.json"},
+        "checksums": "checksums.sha256",
+    }
+    write_compact_json(output / "manifest.json", manifest)
     (output / "README.md").write_text(
         "# Blob Emoji static bundle\n\n"
-        f"`picker.json` is derived from pinned Emojibase {EMOJIBASE_VERSION} and contains ordered Unicode categories, pooled CLDR names/keywords, skin-tone variants, and Emojibase/JoyPixels shortcode lookup. "
+        f"This self-contained bundle is identified by `bundle-{commit}` and is derived from Unicode Emoji {EMOJI_VERSION} and pinned Emojibase {EMOJIBASE_VERSION}. "
+        "`manifest.json` is the provider-neutral entry point and declares the runtime picker, source picker, text-recognition manifest, atlases, SVG lookup, and checksums. "
+        "`clover-picker.json` schema 1 contains compact groups and rows whose fields are declared by `group_fields` and `record_fields`; each row ordinal is its 64-pixel atlas slot. "
+        "`picker.json` schema 1 remains the source contract and contains ordered Unicode categories, pooled CLDR names/keywords, skin-tone variants, and Emojibase/JoyPixels shortcode lookup. "
         "Each compact base-emoji row follows `record_fields`; sequence integers index `sequences`, while name and keyword integers index `strings`. Shortcode values also index `sequences`. "
-        "`assets.json` documents deterministic image lookup and explicitly lists missing Emoji 17 sequences. "
+        "`text-manifest.json` maps every fully-qualified sequence to its accessible label and repeats the explicit missing-artwork list. `assets.json` documents deterministic image lookup. "
         "Convert a sequence to lowercase hexadecimal code points joined by `-`, remove `fe0f`, then use `svg/<asset-key>.svg`. "
         "Country flags use the preserved upstream waved region-flag SVGs; render those assets instead of the regional-indicator text. "
-        "SVGs were XML-sanitized during this build. See `LICENSES/` for preserved upstream and Emojibase notices.\n",
+        "SVGs were XML-sanitized during this build. `checksums.sha256` lists every distributed file except itself. See `LICENSES/` for preserved upstream and Emojibase notices.\n",
         encoding="utf-8",
     )
+    write_checksums(output)
     print(f"Validated {len(expected)} fully-qualified Emoji {EMOJI_VERSION} sequences: {len(expected) - len(missing)} available, {len(missing)} missing.")
     if missing:
         print(f"Missing-sequence report: {output / 'assets.json'}", file=sys.stderr)

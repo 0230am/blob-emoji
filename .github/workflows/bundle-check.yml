@@ -9,14 +9,26 @@ permissions:
 
 jobs:
   bundle:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python scripts/build_bundle.py --output dist/blob-emoji
+          cache: pip
+      - name: Install pinned bundle dependencies
+        run: pip install --requirement requirements-bundle.txt
+      - name: Build and verify bundle
+        run: |
+          python scripts/build_bundle.py --output dist/blob-emoji
+          python scripts/verify_bundle.py dist/blob-emoji
+      - name: Prove deterministic output in the pinned runner environment
+        run: |
+          python scripts/build_bundle.py --output dist/blob-emoji-repeat
+          python scripts/verify_bundle.py dist/blob-emoji-repeat
+          cmp dist/blob-emoji/checksums.sha256 dist/blob-emoji-repeat/checksums.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: blob-emoji-bundle-validation
           path: dist/blob-emoji
+          if-no-files-found: error

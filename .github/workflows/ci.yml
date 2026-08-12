@@ -21,4 +21,4 @@ jobs:
       # font-build pipeline. This repository publishes static SVG bundles only;
       # bundle-check.yml performs its functional Unicode/asset validation.
       - name: Check bundle-builder syntax
-        run: python -m py_compile scripts/build_bundle.py
+        run: python -m py_compile scripts/build_bundle.py scripts/bundle_artifacts.py scripts/verify_bundle.py scripts/package_bundle.py

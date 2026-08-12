@@ -241,6 +241,12 @@ clean:
 	rm -f waveflag
 	rm -rf $(BUILD_DIR)
 
+bundle:
+	$(PYTHON) scripts/build_bundle.py --output dist/blob-emoji
+
+verify-bundle:
+	$(PYTHON) scripts/verify_bundle.py dist/blob-emoji
+
 # This prints the value of a Makefile variable: e.g. `make print-SELECTED_FLAGS`
 # will print the content of SELECTED_FLAGS.
 # Source: https://apprize.best/linux/gnu/3.html
@@ -249,5 +255,5 @@ print-%: ; @echo $* = $($*)
 .SECONDARY: $(EMOJI_FILES) $(FLAG_FILES) $(RESIZED_FLAG_FILES) $(RENAMED_FLAG_FILES) \
   $(ALL_QUANTIZED_FILES) $(ALL_COMPRESSED_FILES)
 
-.PHONY:	clean flags emoji renamed_flags quantized compressed check_tools
+.PHONY:	clean flags emoji renamed_flags quantized compressed check_tools bundle verify-bundle
 
