@@ -22,6 +22,7 @@ jobs:
         run: |
           python scripts/build_bundle.py --output dist/blob-emoji
           python scripts/verify_bundle.py dist/blob-emoji
+          python scripts/package_npm.py dist/blob-emoji dist/npm/blob-emoji dist/npm/blob-emoji.tgz
       - name: Prove deterministic output in the pinned runner environment
         run: |
           python scripts/build_bundle.py --output dist/blob-emoji-repeat
@@ -30,5 +31,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: blob-emoji-bundle-validation
-          path: dist/blob-emoji
+          path: |
+            dist/blob-emoji
+            dist/npm/blob-emoji
+            dist/npm/blob-emoji.tgz
           if-no-files-found: error

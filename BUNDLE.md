@@ -4,6 +4,8 @@ This repository tracks [tpnonthealps/blob-emoji](https://github.com/tpnonthealps
 
 Consumers should download and pin a `bundle-<commit>` GitHub Release archive and unpack it into their own static-assets directory. They must not use this repository as a Git submodule or fetch a mutable branch at runtime.
 
+The same immutable assets needed by Clover are also published as the public, asset-only npm package `@0230am/blob-emoji`. Its exact version is derived from the bundle ID: bundle `17.0.0-528935cd` is package version `17.0.0-528935cd.0`. The generated package has no JavaScript entry point, runtime dependencies, or lifecycle scripts. Its `bundleId` and `publicBaseUrl` metadata identify the corresponding canonical static release.
+
 `picker.json` is the compact text-input and picker index. It is derived at build time from pinned `emojibase-data` 17.0.0, which supplies Emoji 17 / Unicode 17 / CLDR 48 labels, search tags, picker order, groups, subgroups, and nested skin-tone variants. Repeated strings and Unicode sequences are pooled and referenced by integer indexes. The maintained Emojibase shortcode preset is canonical, with the JoyPixels preset added as a fallback; shortcode values index the shared `sequences` array.
 
 SVG filenames are deterministic Unicode asset keys, such as `svg/1f44d.svg`: lowercase hexadecimal code points joined by `-`, with `FE0F` removed. Country-flag assets come from the preserved upstream `third_party/region-flags/waved-svg` set, so consumers should render the resolved SVG for a flag sequence instead of displaying its regional-indicator characters as native text. `assets.json` documents the lookup rule and explicitly lists any fully-qualified Unicode Emoji 17 sequence without artwork. No sequence is silently discarded.
@@ -36,6 +38,10 @@ python scripts/build_bundle.py --output dist/blob-emoji
 python scripts/verify_bundle.py dist/blob-emoji
 python scripts/package_bundle.py dist/blob-emoji blob-emoji-<commit>.tar.gz
 python scripts/verify_bundle.py dist/blob-emoji --archive blob-emoji-<commit>.tar.gz
+python scripts/package_npm.py dist/blob-emoji dist/npm/blob-emoji dist/npm/blob-emoji.tgz
+pnpm add @0230am/blob-emoji@<exact-version>
 ```
 
-The equivalent convenience targets are `make bundle` and `make verify-bundle`. Release archives contain one top-level `blob-emoji/` directory, use sorted entries and normalized Git-commit timestamps, ownership, and permissions, and are published as `blob-emoji-<full-commit>.tar.gz` under `bundle-<full-commit>` with a sibling `.sha256` file.
+The equivalent convenience targets are `make bundle`, `make verify-bundle`, `make package-npm`, and `make verify-npm`. Release archives contain one top-level `blob-emoji/` directory, use sorted entries and normalized Git-commit timestamps, ownership, and permissions, and are published as `blob-emoji-<full-commit>.tar.gz` under `bundle-<full-commit>` with a sibling `.sha256` file and the exact validated `blob-emoji.tgz` npm artifact.
+
+The npm package contains the complete verified bundle byte-for-byte—including `manifest.json`, `assets.json`, `clover-picker.json`, `text-manifest.json`, `atlas/`, `svg/`, and `LICENSES/`—plus its generated `package.json`. Retaining `picker.json`, `checksums.sha256`, and the bundle README keeps every manifest reference self-contained. The Python validator compares every bundled payload file to `checksums.sha256`, compares the checksum index itself to the bundle, rejects extra files, symlinks, dependencies, executable entry points, and lifecycle scripts, and verifies the npm tarball byte-for-byte. Publishing uses npm's public registry and the existing immutable release workflow with npm provenance. After the first interactive publication, configure `upstream-and-release.yml` as the trusted publisher for `0230am/blob-emoji` on npm; the workflow does not use a registry token. It then performs an exact-version anonymous pnpm install with its npm user configuration disabled and revalidates the installed payload.

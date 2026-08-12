@@ -46,6 +46,9 @@ jobs:
 
   build-bundle:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,11 +61,20 @@ jobs:
         run: |
           python scripts/build_bundle.py --output dist/blob-emoji
           python scripts/verify_bundle.py dist/blob-emoji
+          python scripts/package_npm.py dist/blob-emoji dist/npm/blob-emoji dist/npm/blob-emoji.tgz
       - name: Upload bundle and coverage metadata
         uses: actions/upload-artifact@v4
         with:
           name: blob-emoji-bundle
           path: dist/blob-emoji
+          if-no-files-found: error
+      - name: Upload npm package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-emoji-npm-package
+          path: |
+            dist/npm/blob-emoji
+            dist/npm/blob-emoji.tgz
           if-no-files-found: error
       - name: Package release archive
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -76,4 +88,30 @@ jobs:
           TAG: bundle-${{ github.sha }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then exit 0; fi
-          gh release create "$TAG" "blob-emoji-${{ github.sha }}.tar.gz" "blob-emoji-${{ github.sha }}.tar.gz.sha256" --target "${{ github.sha }}" --title "Blob Emoji bundle $TAG" --notes "Self-contained SVG, picker, text-recognition, and atlas bundle generated from this immutable source commit. See manifest.json and checksums.sha256 in the archive."
+          gh release create "$TAG" "blob-emoji-${{ github.sha }}.tar.gz" "blob-emoji-${{ github.sha }}.tar.gz.sha256" "dist/npm/blob-emoji.tgz" --target "${{ github.sha }}" --title "Blob Emoji bundle $TAG" --notes "Self-contained SVG, picker, text-recognition, atlas, and npm package artifacts generated from this immutable source commit. See manifest.json and checksums.sha256 in the archives."
+      - uses: actions/setup-node@v6
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Publish immutable public npm package
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(python -c 'import json; print(json.load(open("dist/npm/blob-emoji/package.json"))["version"])')
+          if npm view "@0230am/blob-emoji@$VERSION" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then exit 0; fi
+          npm publish dist/npm/blob-emoji.tgz --access public --provenance
+      - name: Verify anonymous pnpm installation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(python -c 'import json; print(json.load(open("dist/npm/blob-emoji/package.json"))["version"])')
+          npm install --global pnpm@10
+          mkdir "$RUNNER_TEMP/blob-emoji-install-check"
+          cd "$RUNNER_TEMP/blob-emoji-install-check"
+          printf '{"private":true}\n' > package.json
+          for ATTEMPT in 1 2 3 4 5; do
+            if env -u NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG=/dev/null pnpm add "@0230am/blob-emoji@$VERSION" --registry https://registry.npmjs.org/; then break; fi
+            if [ "$ATTEMPT" = 5 ]; then exit 1; fi
+            sleep 10
+          done
+          python "$GITHUB_WORKSPACE/scripts/package_npm.py" --verify-only "$GITHUB_WORKSPACE/dist/blob-emoji" "node_modules/@0230am/blob-emoji" "$GITHUB_WORKSPACE/dist/npm/blob-emoji.tgz"
