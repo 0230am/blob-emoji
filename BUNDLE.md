@@ -12,7 +12,7 @@ The build independently validates Emojibase and SVG coverage against Unicode's f
 
 ## Bundle contracts
 
-`manifest.json` schema 1 is the provider-neutral bundle entry point. Its `bundle_id` is `bundle-<full-git-commit>` and its paths are relative to the extraction root. It identifies the runtime and source picker contracts, text-recognition manifest, atlas geometry and encoder settings, SVG lookup, and checksum list.
+`manifest.json` schema 1 is the provider-neutral bundle entry point. Its `bundle_id` has the stable form `<emojibase-version>-<first-eight-source-commit-characters>`, for example `17.0.0-ec3a79d2`, and must match `^[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{8}$`. The version is the pinned Emojibase data version, not the distribution schema version. The commit suffix prevents different source revisions using the same Emojibase release from sharing an immutable public path. Consumers use this value verbatim; there is no separate CDN-specific identifier. All manifest paths are relative to the extraction root. The manifest identifies the runtime and source picker contracts, text-recognition manifest, atlases, SVG lookup, and checksum list.
 
 `picker.json` remains source picker schema 1. Its pooled arrays and row fields are declared in the file. `clover-picker.json` schema 1 is a smaller browser projection with these declared row fields:
 

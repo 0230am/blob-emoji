@@ -26,6 +26,7 @@ except ImportError as error:  # pragma: no cover
 
 
 HEX_SEQUENCE = re.compile(r"[0-9A-F]+(?:-[0-9A-F]+)*")
+BUNDLE_ID = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+-[a-f0-9]{8}$")
 REPRESENTATIVE_SEQUENCES = {
     "1F600",  # simple
     "2764-FE0F",  # variation selector
@@ -108,6 +109,17 @@ def verify_bundle(root: Path) -> None:
         raise ValueError("bundle contracts must be JSON objects")
     if manifest.get("schema_version") != 1 or picker.get("schema_version") != 1 or clover.get("schema_version") != 1:
         raise ValueError("unsupported or undocumented picker/manifest schema")
+    bundle_id = manifest.get("bundle_id")
+    source = manifest.get("source")
+    if not isinstance(bundle_id, str) or not BUNDLE_ID.fullmatch(bundle_id):
+        raise ValueError(f"invalid bundle ID: {bundle_id!r}")
+    if not isinstance(source, dict) or not isinstance(source.get("commit"), str):
+        raise ValueError("manifest source commit is missing")
+    expected_bundle_id = f"{manifest.get('emojibase_version')}-{source['commit'][:8]}"
+    if bundle_id != expected_bundle_id:
+        raise ValueError(
+            f"bundle ID must derive from Emojibase version and source commit: expected {expected_bundle_id!r}"
+        )
     manifest_paths = {
         "picker": "clover-picker.json",
         "source_picker": "picker.json",

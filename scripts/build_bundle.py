@@ -484,9 +484,10 @@ def main() -> int:
     write_compact_json(output / "clover-picker.json", clover_picker)
     write_compact_json(output / "text-manifest.json", text_manifest)
     atlas_files = build_atlases(output, [row[0] for row in clover_rows], set(missing))
+    bundle_id = f"{EMOJIBASE_VERSION}-{commit[:8]}"
     manifest = {
         "schema_version": 1,
-        "bundle_id": f"bundle-{commit}",
+        "bundle_id": bundle_id,
         "unicode_emoji_version": EMOJI_VERSION,
         "emojibase_version": EMOJIBASE_VERSION,
         "source": {
@@ -518,7 +519,7 @@ def main() -> int:
     write_compact_json(output / "manifest.json", manifest)
     (output / "README.md").write_text(
         "# Blob Emoji static bundle\n\n"
-        f"This self-contained bundle is identified by `bundle-{commit}` and is derived from Unicode Emoji {EMOJI_VERSION} and pinned Emojibase {EMOJIBASE_VERSION}. "
+        f"This self-contained bundle is identified by `{bundle_id}` and is derived from Unicode Emoji {EMOJI_VERSION} and pinned Emojibase {EMOJIBASE_VERSION}. "
         "`manifest.json` is the provider-neutral entry point and declares the runtime picker, source picker, text-recognition manifest, atlases, SVG lookup, and checksums. "
         "`clover-picker.json` schema 1 contains compact groups and rows whose fields are declared by `group_fields` and `record_fields`; each row ordinal is its 64-pixel atlas slot. "
         "`picker.json` schema 1 remains the source contract and contains ordered Unicode categories, pooled CLDR names/keywords, skin-tone variants, and Emojibase/JoyPixels shortcode lookup. "
