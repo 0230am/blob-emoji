@@ -100,7 +100,7 @@ jobs:
         run: |
           VERSION=$(python -c 'import json; print(json.load(open("dist/npm/blob-emoji/package.json"))["version"])')
           if npm view "@0230am/blob-emoji@$VERSION" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then exit 0; fi
-          npm publish dist/npm/blob-emoji.tgz --access public --provenance
+          npm publish dist/npm/blob-emoji.tgz --access public --tag latest --provenance
       - name: Verify anonymous pnpm installation
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
