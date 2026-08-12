@@ -32,6 +32,7 @@ class PackageMetadataTest(unittest.TestCase):
         self.assertEqual(value["name"], "@0230am/blob-emoji")
         self.assertEqual(value["version"], "17.0.0-528935cd.0")
         self.assertIs(value["private"], False)
+        self.assertEqual(value["homepage"], "https://github.com/0230am/blob-emoji")
         self.assertEqual(value["bundleId"], "17.0.0-528935cd")
         self.assertEqual(
             value["publicBaseUrl"],

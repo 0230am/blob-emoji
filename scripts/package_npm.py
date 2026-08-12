@@ -113,6 +113,7 @@ def metadata(bundle: Path) -> dict[str, object]:
             "type": "git",
             "url": "git+https://github.com/0230am/blob-emoji.git",
         },
+        "homepage": "https://github.com/0230am/blob-emoji",
         "bundleId": bundle_id,
         "publicBaseUrl": f"{PUBLIC_BASE_ROOT}/{bundle_id}/",
         "files": list(PACKAGE_ENTRIES),
