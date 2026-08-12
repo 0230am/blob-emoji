@@ -268,12 +268,13 @@ def main() -> int:
     package_root = args.package_root.resolve()
     archive = args.archive.resolve()
     repo = Path(__file__).resolve().parents[1]
-    try:
-        package_root.relative_to(repo)
-    except ValueError:
-        parser.error("package_root must be inside this repository")
-    if package_root in {repo, repo / ".git"}:
-        parser.error("package_root must name a package directory, not the repository")
+    if not args.verify_only:
+        try:
+            package_root.relative_to(repo)
+        except ValueError:
+            parser.error("package_root must be inside this repository when creating a package")
+        if package_root in {repo, repo / ".git"}:
+            parser.error("package_root must name a package directory, not the repository")
     try:
         archive.relative_to(package_root)
     except ValueError:

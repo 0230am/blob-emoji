@@ -87,6 +87,33 @@ class PackageMetadataTest(unittest.TestCase):
             }
             self.assertEqual(actual, set(payloads) | {"package.json"})
 
+    def test_verify_only_accepts_installs_outside_repository(self) -> None:
+        script = Path(package_npm.__file__).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "bundle"
+            installed = root / "external-node-modules" / "@0230am" / "blob-emoji"
+            archive = root / "blob-emoji.tgz"
+            bundle.mkdir()
+            installed.mkdir(parents=True)
+            archive.write_bytes(b"not opened in this test")
+            with (
+                patch.object(
+                    package_npm,
+                    "verify_package",
+                    return_value={
+                        "name": "@0230am/blob-emoji",
+                        "version": "17.0.0-528935cd.0",
+                        "bundleId": "17.0.0-528935cd",
+                        "publicBaseUrl": "https://static.0230.am/clover/emoji/v1/17.0.0-528935cd/",
+                        "publishConfig": {"registry": "https://registry.npmjs.org/"},
+                    },
+                ),
+                patch.object(package_npm, "verify_tarball"),
+                patch.object(sys, "argv", [str(script), "--verify-only", str(bundle), str(installed), str(archive)]),
+            ):
+                self.assertEqual(package_npm.main(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
